@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"0lvl/config"
-	"0lvl/internal/consumer"
 	"0lvl/internal/endpoint"
+	"0lvl/internal/receiver"
 	"0lvl/internal/repository"
 
 	"github.com/ilyakaznacheev/cleanenv"
@@ -27,36 +27,32 @@ func main() {
 
 	var cfg config.Config
 	if err := cleanenv.ReadEnv(&cfg); err != nil {
-		log.Fatal().Err(err).Msg("")
+		log.Fatal().Err(err).Msg("fail read config")
 	}
 
-	repo, err := repository.New(ctx, log, cfg)
+	repo, err := repository.New(ctx, cfg, log)
 	if err != nil {
-		log.Fatal().Err(err).Msg("")
+		log.Fatal().Err(err).Msg("fail new repository")
 	}
-	defer repo.Close()
-	
-	go func() {
-		err = endpoint.Run(ctx, repo, log)
-		if err != nil {
-			log.Fatal().Err(err).Msg("")
-		}
-	}()
 
-	err = consumer.Run(repo, log, cfg)
+	conn, err := receiver.New("3", repo, cfg, log)
 	if err != nil {
-		log.Fatal().Err(err).Msg("")
+		log.Fatal().Err(err).Msg("fail new receiver")
 	}
+	defer conn.Close()
 
-	log.Info().Msg("[START SERVICE]")
+	e := endpoint.New(repo, log)
+	go e.Run()
 
-	signals := make(chan os.Signal, 16)
+	log.Info().Msg("starting service")
+
+	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGABRT)
 
 	for {
 		sign := <-signals
-		log.Info().Str("signal", sign.String()).Msg("[STOP SERVICE]")
 		ctxCancel()
-		return
+		log.Info().Str("signal", sign.String()).Msg("stoping service")
+		break
 	}
 }

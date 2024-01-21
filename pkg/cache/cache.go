@@ -8,9 +8,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"unsafe"
-
-	"golang.org/x/sys/unix"
 	xxhash "github.com/cespare/xxhash/v2"
 )
 
@@ -65,7 +62,7 @@ type Cache struct {
 }
 
 // Если maxBytes меньше 32 МБ, то минимальная емкость кэша составляет 32 МБ.
-func New(maxBytes uint64) (*Cache, error) {
+func New(maxBytes int) (*Cache, error) {
 	if maxBytes <= 0 {
 		return nil, fmt.Errorf("maxBytes must be greater than 0; got %d", maxBytes)
 	}
@@ -83,10 +80,10 @@ func New(maxBytes uint64) (*Cache, error) {
 // переполнения кэша или из-за маловероятной коллизии хешей.
 //
 // (k, v) записи, общий размер которых превышает 64 КБ, не сохраняются в кеше.
-func (c *Cache) Set(k, v []byte) error {
+func (c *Cache) Set(k, v []byte) {
 	h := xxhash.Sum64(k)
 	idx := h % bucketsCount
-	return c.buckets[idx].Set(k, v, h)
+	c.buckets[idx].Set(k, v, h)
 }
 
 // Get добавляет значение по ключу k в dst и возвращает результат.
@@ -226,12 +223,12 @@ func (b *bucket) UpdateStats(s *Stats) {
 	b.mu.RUnlock()
 }
 
-func (b *bucket) Set(k, v []byte, h uint64) error {
+func (b *bucket) Set(k, v []byte, h uint64) {
 	atomic.AddUint64(&b.setCalls, 1)
 	if len(k) >= (1<<16) || len(v) >= (1<<16) {
         // Слишком большой ключ или значение — его длину невозможно закодировать
         // с 2 байтами (см. ниже). Пропустить запись.
-		return fmt.Errorf("set max len k or v")
+		return 
 	}
 	var kvLenBuf [4]byte
 	kvLenBuf[0] = byte(uint16(len(k)) >> 8)
@@ -240,7 +237,7 @@ func (b *bucket) Set(k, v []byte, h uint64) error {
 	kvLenBuf[3] = byte(len(v))
 	kvLen := uint64(len(kvLenBuf) + len(k) + len(v))
 	if kvLen >= chunkSize {
-		return fmt.Errorf("chunk max 64KB; len k and v: %d", kvLen)
+		return 
 	}
 
 	chunks := b.chunks
@@ -282,7 +279,6 @@ func (b *bucket) Set(k, v []byte, h uint64) error {
 		b.cleanLocked()
 	}
 	b.mu.Unlock()
-	return nil
 }
 
 func (b *bucket) Get(dst, k []byte, h uint64, returnDst bool) ([]byte, bool) {
@@ -318,6 +314,7 @@ func (b *bucket) Get(dst, k []byte, h uint64, returnDst bool) ([]byte, bool) {
 				atomic.AddUint64(&b.corruptions, 1)
 				goto end
 			}
+			// тоже подумал
 			// https://github.com/VictoriaMetrics/fastcache/issues/59
 			if string(k) == string(chunk[idx:idx+keyLen]) {
 				idx += keyLen
@@ -342,46 +339,4 @@ func (b *bucket) Del(h uint64) {
 	b.mu.Lock()
 	delete(b.m, h)
 	b.mu.Unlock()
-}
-
-const chunksPerAlloc = 1024
-
-var (
-	freeChunks     []*[chunkSize]byte
-	freeChunksLock sync.Mutex
-)
-
-func getChunk() []byte {
-	freeChunksLock.Lock()
-	if len(freeChunks) == 0 {
-        // Выделяем внекучную память, чтобы GOGC не учитывал размер кэша.
-        // Это должно уменьшить потерю свободной памяти.
-		data, err := unix.Mmap(-1, 0, chunkSize*chunksPerAlloc, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_ANON|unix.MAP_PRIVATE)
-		if err != nil {
-			panic(fmt.Errorf("cannot allocate %d bytes via mmap: %s", chunkSize*chunksPerAlloc, err))
-		}
-		for len(data) > 0 {
-			p := (*[chunkSize]byte)(unsafe.Pointer(&data[0]))
-			freeChunks = append(freeChunks, p)
-			data = data[chunkSize:]
-		}
-	}
-	n := len(freeChunks) - 1
-	p := freeChunks[n]
-	freeChunks[n] = nil
-	freeChunks = freeChunks[:n]
-	freeChunksLock.Unlock()
-	return p[:]
-}
-
-func putChunk(chunk []byte) {
-	if chunk == nil {
-		return
-	}
-	chunk = chunk[:chunkSize]
-	p := (*[chunkSize]byte)(unsafe.Pointer(&chunk[0]))
-
-	freeChunksLock.Lock()
-	freeChunks = append(freeChunks, p)
-	freeChunksLock.Unlock()
 }

@@ -1,11 +1,11 @@
 pub:
-	go run -race publisher.go
+	go run -race cmd/publisher/main.go
 
 run:
-	go run -race cmd/main.go
+	go run -race cmd/orderstorage/main.go
 
 vet:
-	go vet cmd/main.go
+	go vet cmd/orderstorage/main.go
 
 lint:
-	golint cmd/main.go
+	golint cmd/orderstorage/main.go

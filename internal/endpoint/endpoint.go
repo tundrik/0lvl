@@ -1,7 +1,6 @@
 package endpoint
 
 import (
-	"context"
 	"net/http"
 
 	"0lvl/internal/repository"
@@ -21,33 +20,37 @@ type Endpoint struct {
 	log   zerolog.Logger
 }
 
-func Run(ctx context.Context, repo *repository.Repo, log zerolog.Logger) error {
-	h := Endpoint{
+func New(repo *repository.Repo, log zerolog.Logger) *Endpoint {
+	return &Endpoint{
 		repo: repo,
 		log: log,
 	}
+}
+
+func (e *Endpoint) Run()  {
     router := httprouter.New()
-    router.GET("/", h.index)
-    router.GET("/order/:uid", h.order)
-	router.GET("/metric", h.metric)
+    router.GET("/", e.index)
+    router.GET("/order/:uid", e.order)
+	router.GET("/metric", e.metrica)
 
 	server := &http.Server{
 		Addr:    ":8000",
 		Handler: router,
 	}
-
-	return server.ListenAndServe()
+    err := server.ListenAndServe(); if err != nil {
+		e.log.Fatal().Err(err).Msg("fail listen")
+	}
 }
 
-
-
-func (h *Endpoint) index(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-    b := h.repo.GetOrderList(32)
+func (e *Endpoint) index(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+    b := e.repo.OrdersLink(32)
 	w.Write(b)
 }
 
-func (h *Endpoint) order(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-	b, err := h.repo.GetOrderByUid(ps.ByName("uid")); if err != nil {
+func (e *Endpoint) order(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	uid := ps.ByName("uid")
+	b, err := e.repo.Order(uid); if err != nil {
+		e.log.Err(err).Msg("")
 		w.WriteHeader(404)
         w.Write(msgNoData)
         return
@@ -55,7 +58,7 @@ func (h *Endpoint) order(w http.ResponseWriter, r *http.Request, ps httprouter.P
 	w.Write(b)
 }
 
-func (h *Endpoint) metric(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	b := h.repo.Metric()
+func (e *Endpoint) metrica(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	b := e.repo.Metrica()
 	w.Write(b)
 }

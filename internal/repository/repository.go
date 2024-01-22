@@ -35,6 +35,8 @@ const (
 	// поскольку initCacheCount может быть довольно большим
 	// то поделим на чанки maxSelectLimit
 	maxSelectLimit = 20000
+
+	urlOrder = "http://localhost:8000/order/"
 )
 
 
@@ -128,14 +130,19 @@ func (r *Repo) OrdersLink(count int) []byte {
 
 	for rows.Next() {
 		rowValues := rows.RawValues()
-		pk := string(rowValues[0])
+        pk := string(rowValues[0]) 
+
+		var sb strings.Builder
+		sb.WriteString(urlOrder)
+		sb.WriteString(pk)
 
 		entity := OrderLink{
-			Uid:  pk,
-			Link: "http://localhost:8000/order/" + pk,
+			Uid: pk,
+			Link: sb.String(),
 		}
 		entities = append(entities, entity)
 	}
+
 	if err := rows.Err(); err != nil {
 		r.log.Err(err).Msg("db error")
 	}

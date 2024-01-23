@@ -35,11 +35,13 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("fail new repository")
 	}
-    
+
+	log.Info().Msg("start cache warm up")
 	repo.СacheWarmUp()
 	// Если не ждать процесс заполнения кеша
 	// Это может вытеснить более свежие заказы добавленные
-	// ресивером более старыми из базы дпнных
+	// ресивером более старыми из базы данных
+	log.Info().Msg("done cache warm up")
 
 	rec, err := receiver.New(repo, cfg, log)
 	if err != nil {

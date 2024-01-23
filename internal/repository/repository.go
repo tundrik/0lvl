@@ -18,28 +18,15 @@ import (
 	"github.com/rs/zerolog"
 )
 
-
 const (
 	// maxCacheBytes - максимальный размер кеша (FIFO).
 	maxCacheBytes = 1024 * 1024 * 32
 
-	// entryByteSize - примерный размер кешированного ордера в байтах.
-	// Если это будет меньше чем по факту то запрос в db при старте будет с большим лимитом
-	// чем влезет в кеш.
-	// Это вытеснит свежие заказы более старыми.
-	// при двух item в ордере это 1000 - 1300
-	entryByteSize = 1280
-
-	// initCacheCount - количество ордеров из db для прогрева кеша при старте.
-	initCacheCount = maxCacheBytes / entryByteSize
-
-	// поскольку initCacheCount может быть довольно большим
-	// то поделим на чанки maxSelectLimit
-	maxSelectLimit = 20000
+	// лимит каждого запроса при заполнении кеша при старте
+	selectLimit = 1024
 
 	urlOrder = "http://localhost:8000/order/"
 )
-
 
 type Repo struct {
 	db    *pgxpool.Pool
@@ -105,7 +92,7 @@ func (r *Repo) SaveOrderBatch(batch []*inspector.OrderBox) []*inspector.OrderBox
 
 	for _, box := range batch {
 		_, err := results.Exec()
-		
+
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) {
@@ -133,14 +120,14 @@ func (r *Repo) OrdersLink(count int) []byte {
 
 	for rows.Next() {
 		rowValues := rows.RawValues()
-        pk := string(rowValues[0]) 
+		pk := string(rowValues[0])
 
 		var sb strings.Builder
 		sb.WriteString(urlOrder)
 		sb.WriteString(pk)
 
 		entity := OrderLink{
-			Uid: pk,
+			Uid:  pk,
 			Link: sb.String(),
 		}
 		entities = append(entities, entity)
@@ -169,28 +156,18 @@ func (r *Repo) Metrica() []byte {
 	return mb
 }
 
-// Заполняет кеш заказами из базы данных.
-// Разбивает запросы на чанки
-//
-// FIX: переписать опираясь только на 
-// maxCacheBytes и maxSelectLimit
-// иначе этот процесс может вытеснять свежие
-// заказы из кеша более старыми
+// Рекурсивно заполняет кеш заказами из базы данных.
+// Пока в одном из баскетов кеша не потребуется удалять записи
+// Это заполняет кеш на 50%, хз как его заполнить чтобы более 
+// старые записи не затерли свежие.
+// В данной реализации кеша с баскетами
 func (r *Repo) СacheWarmUp() {
-	var cursor uint64
-
-	for i := 0; i < initCacheCount/maxSelectLimit; i++ {
-		cursor = r.cacheWarmUpChank(maxSelectLimit, cursor)
-	}
-
-	mod := initCacheCount % maxSelectLimit
-	if mod > 0 {
-		r.cacheWarmUpChank(mod, cursor)
-	}
-	r.log.Info().Msg("done cache warm up")
+	r.cacheWarmUpChank(selectLimit, 0)
 }
 
-func (r *Repo) cacheWarmUpChank(limit int, cursor uint64) uint64 {
+func (r *Repo) cacheWarmUpChank(limit int, cursor uint64) {
+	defer timer(r.log)(limit)
+
 	var sql strings.Builder
 	namedArgs := make(map[string]interface{})
 	namedArgs["limit"] = limit
@@ -212,7 +189,12 @@ func (r *Repo) cacheWarmUpChank(limit int, cursor uint64) uint64 {
 
 	for rows.Next() {
 		rowValues := rows.RawValues()
-		r.cache.Set(rowValues[0], rowValues[2])
+		hasNeedClean := r.cache.StopSet(rowValues[0], rowValues[2])
+
+		if hasNeedClean {
+			r.log.Warn().Bool("StopNeedClean", hasNeedClean).Msg("")
+			return
+		}
 
 		cursor = binary.BigEndian.Uint64(rowValues[1])
 	}
@@ -221,7 +203,7 @@ func (r *Repo) cacheWarmUpChank(limit int, cursor uint64) uint64 {
 		r.log.Err(err).Msg("db error")
 	}
 
-	return cursor
+	r.cacheWarmUpChank(selectLimit, cursor)
 }
 
 func timer(logger zerolog.Logger) func(c int) {

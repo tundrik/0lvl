@@ -21,8 +21,8 @@ var (
 func getChunk() []byte {
 	freeChunksLock.Lock()
 	if len(freeChunks) == 0 {
-		// Allocate offheap memory, so GOGC won't take into account cache size.
-		// This should reduce free memory waste.
+		// Выделяем внекучную память, чтобы GOGC не учитывал размер кэша.
+		// Это должно уменьшить потерю свободной памяти.
 		data, err := unix.Mmap(-1, 0, chunkSize*chunksPerAlloc, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_ANON|unix.MAP_PRIVATE)
 		if err != nil {
 			panic(fmt.Errorf("cannot allocate %d bytes via mmap: %s", chunkSize*chunksPerAlloc, err))

@@ -83,7 +83,15 @@ func New(maxBytes int) (*Cache, error) {
 func (c *Cache) Set(k, v []byte) {
 	h := xxhash.Sum64(k)
 	idx := h % bucketsCount
-	c.buckets[idx].Set(k, v, h)
+	c.buckets[idx].Set(k, v, h, false)
+}
+
+// StopSet не запускает очистку при переполнении
+// в место этого вернет true
+func (c *Cache) StopSet(k, v []byte) bool {
+	h := xxhash.Sum64(k)
+	idx := h % bucketsCount
+	return c.buckets[idx].Set(k, v, h, true)
 }
 
 // Get добавляет значение по ключу k в dst и возвращает результат.
@@ -223,12 +231,12 @@ func (b *bucket) UpdateStats(s *Stats) {
 	b.mu.RUnlock()
 }
 
-func (b *bucket) Set(k, v []byte, h uint64) {
+func (b *bucket) Set(k, v []byte, h uint64, stopNeedClean bool) bool {
 	atomic.AddUint64(&b.setCalls, 1)
 	if len(k) >= (1<<16) || len(v) >= (1<<16) {
         // Слишком большой ключ или значение — его длину невозможно закодировать
         // с 2 байтами (см. ниже). Пропустить запись.
-		return 
+		return false
 	}
 	var kvLenBuf [4]byte
 	kvLenBuf[0] = byte(uint16(len(k)) >> 8)
@@ -237,7 +245,7 @@ func (b *bucket) Set(k, v []byte, h uint64) {
 	kvLenBuf[3] = byte(len(v))
 	kvLen := uint64(len(kvLenBuf) + len(k) + len(v))
 	if kvLen >= chunkSize {
-		return 
+		return false
 	}
 
 	chunks := b.chunks
@@ -257,6 +265,12 @@ func (b *bucket) Set(k, v []byte, h uint64) {
 				b.gen++
 			}
 			needClean = true
+
+			if (stopNeedClean) {
+				b.mu.Unlock()
+				return true
+			}
+
 		} else {
 			idx = chunkIdxNew * chunkSize
 			idxNew = idx + kvLen
@@ -279,6 +293,7 @@ func (b *bucket) Set(k, v []byte, h uint64) {
 		b.cleanLocked()
 	}
 	b.mu.Unlock()
+	return false
 }
 
 func (b *bucket) Get(dst, k []byte, h uint64, returnDst bool) ([]byte, bool) {

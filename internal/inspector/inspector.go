@@ -13,7 +13,7 @@ const (
 	maxLenData = 1024 * 3
 )
 
-type MsgBox struct {
+type OrderBox struct {
 	Uid  string
 	Rang int64
 	Msg  *stan.Msg
@@ -33,7 +33,7 @@ func New() Ispector {
 	}
 }
 
-func (sp Ispector) Audit(box MsgBox) MsgBox {
+func (sp Ispector) Audit(box OrderBox) OrderBox {
 
 	if len(box.Data) > maxLenData {
 		box.Err = errors.New("max len m Data")

@@ -89,7 +89,7 @@ func (r *Repo) Order(uid string) ([]byte, error) {
 // собирает sql в пакет и отправляет в базу
 // успешно сохраненные сохраняет в кеш по одному
 // при ошибке INSERT в кеш непоподает, а в box добавляется ошибка pg
-func (r *Repo) SaveOrderBatch(batch []*inspector.MsgBox) []*inspector.MsgBox {
+func (r *Repo) SaveOrderBatch(batch []*inspector.OrderBox) []*inspector.OrderBox {
 	defer timer(r.log)(len(batch))
 
 	pgBatch := &pgx.Batch{}

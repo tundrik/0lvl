@@ -35,7 +35,7 @@ func BenchmarkJkjscan(b *testing.B) {
 	b.SetBytes(int64(len(data)))
 
 	for i := 0; i < b.N; i++ {
-		newBox := MsgBox{
+		newBox := OrderBox{
 			Data: bb,
 		}
 		newBox = sp.Audit(newBox)
@@ -67,7 +67,7 @@ func benchmarkJkjscan(b *testing.B) {
 	b.SetBytes(int64(len(data)))
 
 	for i := 0; i < b.N; i++ {
-		newBox := MsgBox{
+		newBox := OrderBox{
 			Data: bb,
 		}
 		newBox = sp.Audit(newBox)
@@ -87,7 +87,7 @@ func benchmarkFastjson(b *testing.B) {
 	auditor := NewAuditor2()
 
 	for i := 0; i < b.N; i++ {
-		newBox := MsgBox{
+		newBox := OrderBox{
 			Data: bb,
 		}
         newBox = auditor.Audit(newBox)
@@ -420,7 +420,7 @@ func NewAuditor2() Auditor2 {
 	return Auditor2{}
 }
 
-func (a Auditor2) Audit(box MsgBox) MsgBox {
+func (a Auditor2) Audit(box OrderBox) OrderBox {
 	var err error
 
 	if len(box.Data) > maxLenData {

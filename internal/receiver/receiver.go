@@ -89,7 +89,7 @@ func (r *Receiver) Run() error {
 }
 
 // Запускает накопителей с разным таймингом обращений в базу данных.
-func (r *Receiver) massCumulate(ch <-chan inspector.MsgBox, cumCount int) {
+func (r *Receiver) massCumulate(ch <-chan inspector.OrderBox, cumCount int) {
 	size := defaultMaxSize
 	deadline := defaultDeadline
 
@@ -104,12 +104,12 @@ func (r *Receiver) massCumulate(ch <-chan inspector.MsgBox, cumCount int) {
 // Подписчик создает канал и подписывается
 // На каждый обратный вызов проверяет данные
 // и отправляет по каналу в накопитель - cumulative
-func (r *Receiver) subscriber() (<-chan inspector.MsgBox, error) {
-	ch := make(chan inspector.MsgBox, 32)
+func (r *Receiver) subscriber() (<-chan inspector.OrderBox, error) {
+	ch := make(chan inspector.OrderBox, 32)
 	ins := inspector.New()
 
 	accept := func(m *stan.Msg) {
-		newBox := inspector.MsgBox{
+		newBox := inspector.OrderBox{
 			Msg:  m,
 			Data: m.Data,
 		}
@@ -142,8 +142,8 @@ func (r *Receiver) subscriber() (<-chan inspector.MsgBox, error) {
 // Накопитель принимает проверенные данные,
 // при накоплении до лимита или по дедлайну сливает в базу данных.
 // Блокируется в ожидании результатов от базы данных.
-func (r *Receiver) cumulative(ch <-chan inspector.MsgBox, size int, deadline int) {
-	batch := make([]*inspector.MsgBox, 0, size)
+func (r *Receiver) cumulative(ch <-chan inspector.OrderBox, size int, deadline int) {
+	batch := make([]*inspector.OrderBox, 0, size)
 
 	flush := func() {
 		results := r.repo.SaveOrderBatch(batch)

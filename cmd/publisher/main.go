@@ -16,7 +16,8 @@ import (
 )
 
 func createLogger() zerolog.Logger {
-	output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+	zerolog.TimeFieldFormat = time.RFC3339Nano
+	output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.StampMilli}
 	return zerolog.New(output).With().Timestamp().Logger()
 }
 
@@ -87,6 +88,13 @@ func genOrder() repository.Order {
 	return order
 }
 
+func timer(logger zerolog.Logger) func(c int) {
+	start := time.Now()
+	return func(c int) {
+		logger.Info().Int("count orders", c).Int("milliseconds", int(time.Since(start).Milliseconds())).Msg("publish done")
+	}
+}
+
 func main() {
 	time.Local = time.UTC
 
@@ -97,7 +105,10 @@ func main() {
 	}
 	defer sc.Close()
 
-	for {
+    count := 6000
+	defer timer(logger)(count)
+
+	for i := 0; i < count; i++ {
 		dataOrder := genOrder()
 
 		b, _ := json.Marshal(dataOrder)
@@ -105,9 +116,6 @@ func main() {
 		err = sc.Publish("order", b); if err != nil {
 			logger.Fatal().Err(err).Msg("")
 		}
-
-        logger.Info().Str("uid", dataOrder.OrderUid).Msg("publish order")
-		time.Sleep(3000 * time.Millisecond) 
 	}
 }
 

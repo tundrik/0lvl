@@ -1,6 +1,7 @@
 package receiver
 
 import (
+	"runtime"
 	"time"
 
 	"0lvl/config"
@@ -11,29 +12,31 @@ import (
 	"github.com/rs/zerolog"
 )
 
-
+/* Stan Options */
 const (
-	// Receiver будет накапливать заказы до bufLimit
-	// и отправлять на сохранение пакетом для снижения нагрузки
-	// на Postgres.
-	bufLimit = 128
+	// maxInflight — максимальное количество сообщений,
+	// которые будет отправлять кластер без подтверждения.
+	defaultMaxInflight = 1024
 
-	// если трафик низкий не ждем накопления а сохраняем по истечению deadline.
-	deadline = 500 * time.Millisecond
-
-	// maxInflight — опция, позволяющая установить максимальное количество сообщений, которые будет отправлять кластер.
-	// без подтверждения.
-	maxInflight = 128
-
-	// повторно заказы прилетят из stan если их не подтвердить за natsAskWait
+	// Повторно заказы прилетят из stan если их не подтвердить за defaultAckWait
 	// В редких случаях при получении повторных заказов
-	// receiver пологается на Postgres ограничение уникальности
-	natsAskWait = deadline * 3
+	// Receiver пологается на Postgres ограничение уникальности.
+	defaultAckWait = 5 * time.Minute
 )
 
+/* Receiver Options */
+const (
+	// Количество накопителей на каждого подписчика.
+	defaultCumCount = 2
+
+	// defaultMaxSize — максимальный размер пакета заказов отправленных в базу данных.
+	defaultMaxSize = 512
+
+	// если трафик низкий пакет отправится по дедлайну не дожидаясь максимального размера.
+	defaultDeadline = 256 // ms
+)
 
 type Receiver struct {
-	id   string
 	conn stan.Conn
 
 	cfg  config.Config
@@ -41,33 +44,68 @@ type Receiver struct {
 	log  zerolog.Logger
 }
 
-func New(id string, repo *repository.Repo, cfg config.Config, log zerolog.Logger) (stan.Conn, error) {
-	conn, err := stan.Connect(cfg.StanClusterId, cfg.StanClientId+id)
+func New(repo *repository.Repo, cfg config.Config, log zerolog.Logger) (*Receiver, error) {
+	// Этот обратный вызов будет вызван, если клиент окончательно потеряет
+	// контакт с сервером (или другой клиент заменяет его во время пребывания conn.Close()).
+	connectionLost := func(_ stan.Conn, reason error) {
+		log.Error().Err(reason).Msg("stan callback error")
+	}
+	opt := stan.SetConnectionLostHandler(connectionLost)
+
+	conn, err := stan.Connect(cfg.StanClusterId, cfg.StanClientId, opt)
 	if err != nil {
 		return nil, err
 	}
 
-	r := &Receiver{
-		id:   id,
+	rec := &Receiver{
 		conn: conn,
 		cfg:  cfg,
 		repo: repo,
 		log:  log,
 	}
 
-	buf := make(chan inspector.MsgBox, bufLimit)
-
-	err = r.subscribe(buf)
-	if err != nil {
-		return nil, err
-	}
-
-	go r.cumulate(buf)
-
-	return conn, nil
+	return rec, nil
 }
 
-func (r *Receiver) subscribe(buf chan<- inspector.MsgBox) error {
+// Закрывает соединение stan.Conn.
+func (r *Receiver) Close() {
+	r.conn.Close()
+}
+
+func (r *Receiver) Run() error {
+	// Количество подписчиков.
+	subCount := runtime.NumCPU() / 2
+	// Количество накопителей на каждого подписчика.
+	cumCount := defaultCumCount
+
+	for i := 0; i < subCount; i++ {
+		ch, err := r.subscriber()
+		if err != nil {
+			return err
+		}
+		r.massCumulate(ch, cumCount)
+	}
+	return nil
+}
+
+// Запускает накопителей с разным таймингом обращений в базу данных.
+func (r *Receiver) massCumulate(ch <-chan inspector.MsgBox, cumCount int) {
+	size := defaultMaxSize
+	deadline := defaultDeadline
+
+	for i := 0; i < cumCount; i++ {
+		go r.cumulative(ch, size, deadline)
+
+		size = size - (size*32)/100
+		deadline = deadline - (deadline*16)/100
+	}
+}
+
+// Подписчик создает канал и подписывается
+// На каждый обратный вызов проверяет данные
+// и отправляет по каналу в накопитель - cumulative
+func (r *Receiver) subscriber() (<-chan inspector.MsgBox, error) {
+	ch := make(chan inspector.MsgBox, 32)
 	ins := inspector.New()
 
 	accept := func(m *stan.Msg) {
@@ -77,39 +115,44 @@ func (r *Receiver) subscribe(buf chan<- inspector.MsgBox) error {
 		}
 
 		box := ins.Audit(newBox)
-
 		if box.Err != nil {
-			r.log.Error().Err(box.Err).Msg("audit error")
+			r.log.Warn().Err(box.Err).Msg("inspector audit error")
 			//TODO:подтвердить с ошибкой
+			//nats Term()
 			m.Ack()
 			return
 		}
-		buf <- box
+		ch <- box
 	}
 
 	_, err := r.conn.QueueSubscribe(
 		r.cfg.StanSubject,
 		r.cfg.StanQueue,
 		accept,
-		stan.DurableName(r.cfg.StanClientId+r.id),
+		stan.DurableName("service orders"),
 		stan.SetManualAckMode(),
-		stan.AckWait(natsAskWait),
-		stan.MaxInflight(maxInflight),
+		stan.AckWait(defaultAckWait),
+		stan.MaxInflight(defaultMaxInflight),
 	)
 
 	//QueueSubscribe закроется неявно при закрытии stan.Conn
-	return err
+	return ch, err
 }
 
-func (r *Receiver) cumulate(buf <-chan inspector.MsgBox) {
-	batch := make([]*inspector.MsgBox, 0, bufLimit)
+// Накопитель принимает проверенные данные,
+// при накоплении до лимита или по дедлайну сливает в базу данных.
+// Блокируется в ожидании результатов от базы данных.
+func (r *Receiver) cumulative(ch <-chan inspector.MsgBox, size int, deadline int) {
+	batch := make([]*inspector.MsgBox, 0, size)
 
 	flush := func() {
-		results := r.repo.SaveOrderBatch(batch, r.id)
+		results := r.repo.SaveOrderBatch(batch)
+
 		for _, box := range results {
 			if box.Err != nil {
+				r.log.Error().Err(box.Err).Str("order uid", box.Uid).Msg("save error")
 				//TODO:подтвердить с ошибкой
-				r.log.Error().Err(box.Err).Msg("save error")
+				//nats Term()
 				box.Msg.Ack()
 			}
 			box.Msg.Ack()
@@ -118,7 +161,8 @@ func (r *Receiver) cumulate(buf <-chan inspector.MsgBox) {
 		batch = batch[:0]
 	}
 
-	ticker := time.NewTicker(deadline)
+	d := time.Duration(deadline)
+	ticker := time.NewTicker(d * time.Millisecond)
 
 	for {
 		select {
@@ -127,14 +171,13 @@ func (r *Receiver) cumulate(buf <-chan inspector.MsgBox) {
 				flush()
 			}
 
-		case box := <-buf:
+		case box := <-ch:
 			batch = append(batch, &box)
 
-			if len(batch) == bufLimit {
+			if len(batch) == size {
 				flush()
-				ticker.Reset(deadline)
+				ticker.Reset(d * time.Millisecond)
 			}
-
 		}
 	}
 }

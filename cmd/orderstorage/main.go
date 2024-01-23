@@ -17,7 +17,8 @@ import (
 )
 
 func createLogger() zerolog.Logger {
-	output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+	zerolog.TimeFieldFormat = time.RFC3339Nano
+	output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.StampMilli}
 	return zerolog.New(output).With().Timestamp().Logger()
 }
 
@@ -35,11 +36,17 @@ func main() {
 		log.Fatal().Err(err).Msg("fail new repository")
 	}
 
-	conn, err := receiver.New("3", repo, cfg, log)
+
+	rec, err := receiver.New(repo, cfg, log)
 	if err != nil {
 		log.Fatal().Err(err).Msg("fail new receiver")
 	}
-	defer conn.Close()
+	defer rec.Close()
+    
+	err = rec.Run()
+	if err != nil {
+		log.Fatal().Err(err).Msg("fail run receiver")
+	}
 
 	e := endpoint.New(repo, log)
 	go e.Run()

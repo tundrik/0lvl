@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"0lvl/config"
 	"0lvl/internal/inspector"
@@ -62,7 +63,7 @@ func New(ctx context.Context, cfg config.Config, log zerolog.Logger) (*Repo, err
 		cache: cache,
 		log:   log,
 	}
-	go repo.СacheWarmUp()
+	//go repo.СacheWarmUp()
 	//не ждем пока Сache заполнится идем дальше
 
 	return repo, nil
@@ -87,9 +88,10 @@ func (r *Repo) Order(uid string) ([]byte, error) {
 
 // собирает sql в пакет и отправляет в базу
 // успешно сохраненные сохраняет в кеш по одному
-//
 // при ошибке INSERT в кеш непоподает, а в box добавляется ошибка pg
-func (r *Repo) SaveOrderBatch(batch []*inspector.MsgBox, id string) []*inspector.MsgBox {
+func (r *Repo) SaveOrderBatch(batch []*inspector.MsgBox) []*inspector.MsgBox {
+	defer timer(r.log)(len(batch))
+
 	pgBatch := &pgx.Batch{}
 	const sql = `INSERT INTO trade (pk, rang, entity) VALUES ($1, $2, $3);`
 
@@ -102,7 +104,7 @@ func (r *Repo) SaveOrderBatch(batch []*inspector.MsgBox, id string) []*inspector
 
 	for _, box := range batch {
 		_, err := results.Exec()
-
+		
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) {
@@ -113,7 +115,6 @@ func (r *Repo) SaveOrderBatch(batch []*inspector.MsgBox, id string) []*inspector
 		r.cache.Set([]byte(box.Uid), box.Data)
 	}
 
-	r.log.Debug().Int("len", len(batch)).Str("receiver id", id).Msg("")
 	return batch
 }
 
@@ -211,4 +212,11 @@ func (r *Repo) СacheWarmUpChank(limit int, cursor uint64) uint64 {
 	}
 
 	return cursor
+}
+
+func timer(logger zerolog.Logger) func(c int) {
+	start := time.Now()
+	return func(c int) {
+		logger.Info().Int("count orders", c).Int("milliseconds", int(time.Since(start).Milliseconds())).Msg("done save")
+	}
 }

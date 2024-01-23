@@ -46,7 +46,8 @@ func (sp Ispector) Audit(box MsgBox) MsgBox {
 		if k := i.Key(); k != "" {
 			key := k[1 : len(k)-1]
 
-			schemaRow, ok := sp.schema[key]; if !ok {
+			schemaRow, ok := sp.schema[key]
+			if !ok {
 				box.Err = fmt.Errorf("unregistered key found: %s", key)
 				return true
 			}

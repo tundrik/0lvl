@@ -63,8 +63,6 @@ func New(ctx context.Context, cfg config.Config, log zerolog.Logger) (*Repo, err
 		cache: cache,
 		log:   log,
 	}
-	//go repo.СacheWarmUp()
-	//не ждем пока Сache заполнится идем дальше
 
 	return repo, nil
 }
@@ -170,17 +168,17 @@ func (r *Repo) СacheWarmUp() {
 	var cursor uint64
 
 	for i := 0; i < initCacheCount/maxSelectLimit; i++ {
-		cursor = r.СacheWarmUpChank(maxSelectLimit, cursor)
+		cursor = r.cacheWarmUpChank(maxSelectLimit, cursor)
 	}
 
 	mod := initCacheCount % maxSelectLimit
 	if mod > 0 {
-		r.СacheWarmUpChank(mod, cursor)
+		r.cacheWarmUpChank(mod, cursor)
 	}
 	r.log.Info().Msg("done cache warm up")
 }
 
-func (r *Repo) СacheWarmUpChank(limit int, cursor uint64) uint64 {
+func (r *Repo) cacheWarmUpChank(limit int, cursor uint64) uint64 {
 	var sql strings.Builder
 	namedArgs := make(map[string]interface{})
 	namedArgs["limit"] = limit

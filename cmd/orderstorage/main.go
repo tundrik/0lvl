@@ -35,6 +35,8 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("fail new repository")
 	}
+	go repo.СacheWarmUp()
+	//не ждем пока Сache заполнится идем дальше
 
 
 	rec, err := receiver.New(repo, cfg, log)

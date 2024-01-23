@@ -20,17 +20,17 @@ import (
 
 
 const (
-	// maxCacheBytes максимальный размер кеша (FIFO).
+	// maxCacheBytes - максимальный размер кеша (FIFO).
 	maxCacheBytes = 1024 * 1024 * 32
 
-	// entryByteSize примерный размер кешированного ордера в байтах.
-	// если это будет меньше чем по факту то запрос в db при старте будет с большим лимитом
-	// чем влезет в кеш
-	//
+	// entryByteSize - примерный размер кешированного ордера в байтах.
+	// Если это будет меньше чем по факту то запрос в db при старте будет с большим лимитом
+	// чем влезет в кеш.
+	// Это вытеснит свежие заказы более старыми.
 	// при двух item в ордере это 1000 - 1300
 	entryByteSize = 1280
 
-	// initCacheCount количество ордеров из db для прогрева кеша при старте.
+	// initCacheCount - количество ордеров из db для прогрева кеша при старте.
 	initCacheCount = maxCacheBytes / entryByteSize
 
 	// поскольку initCacheCount может быть довольно большим
@@ -47,6 +47,9 @@ type Repo struct {
 	log   zerolog.Logger
 }
 
+// Инициализирует репозиторий.
+// 1) Пул подключений к базе данных
+// 2) Кеш
 func New(ctx context.Context, cfg config.Config, log zerolog.Logger) (*Repo, error) {
 	db, err := pgxpool.New(ctx, cfg.PgString)
 	if err != nil {
@@ -67,7 +70,7 @@ func New(ctx context.Context, cfg config.Config, log zerolog.Logger) (*Repo, err
 	return repo, nil
 }
 
-// возвращает заказ из кеша, если в кеше нет то из базы
+// Возвращает заказ из кеша, если в кеше нет то из базы данных
 func (r *Repo) Order(uid string) ([]byte, error) {
 	var b []byte
 
@@ -84,9 +87,9 @@ func (r *Repo) Order(uid string) ([]byte, error) {
 	return b, nil
 }
 
-// собирает sql в пакет и отправляет в базу
+// Собирает sql в пакет и отправляет в базу
 // успешно сохраненные сохраняет в кеш по одному
-// при ошибке INSERT в кеш непоподает, а в box добавляется ошибка pg
+// при ошибке INSERT в кеш непоподает, а в box добавляется ошибка pg.
 func (r *Repo) SaveOrderBatch(batch []*inspector.OrderBox) []*inspector.OrderBox {
 	defer timer(r.log)(len(batch))
 
@@ -116,6 +119,7 @@ func (r *Repo) SaveOrderBatch(batch []*inspector.OrderBox) []*inspector.OrderBox
 	return batch
 }
 
+// Возвращает список ссылок заказов на детальный просмотр.
 func (r *Repo) OrdersLink(count int) []byte {
 	const sql = `SELECT pk, rang FROM trade ORDER BY rang DESC LIMIT $1;`
 
@@ -150,6 +154,7 @@ func (r *Repo) OrdersLink(count int) []byte {
 	return b
 }
 
+// Возвращает информацию по кешу и базе данных.
 func (r *Repo) Metrica() []byte {
 	var m Monitor
 	r.cache.UpdateStats(&m.Cache)
@@ -164,6 +169,13 @@ func (r *Repo) Metrica() []byte {
 	return mb
 }
 
+// Заполняет кеш заказами из базы данных.
+// Разбивает запросы на чанки
+//
+// FIX: переписать опираясь только на 
+// maxCacheBytes и maxSelectLimit
+// иначе этот процесс может вытеснять свежие
+// заказы из кеша более старыми
 func (r *Repo) СacheWarmUp() {
 	var cursor uint64
 

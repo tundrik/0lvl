@@ -35,9 +35,11 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("fail new repository")
 	}
-	go repo.СacheWarmUp()
-	//не ждем пока Сache заполнится идем дальше
-
+    
+	repo.СacheWarmUp()
+	// Если не ждать процесс заполнения кеша
+	// Это может вытеснить более свежие заказы добавленные
+	// ресивером более старыми из базы дпнных
 
 	rec, err := receiver.New(repo, cfg, log)
 	if err != nil {
@@ -53,7 +55,7 @@ func main() {
 	e := endpoint.New(repo, log)
 	go e.Run()
 
-	log.Info().Msg("starting service")
+	log.Info().Msg("starting http service")
 
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGABRT)

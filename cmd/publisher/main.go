@@ -32,7 +32,7 @@ func main() {
 	}
 	defer sc.Close()
 
-	countPac := 10
+	countPac := 30
 	count := 1000
 
 	defer timer(logger)(count * countPac)

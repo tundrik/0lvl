@@ -27,7 +27,7 @@ const (
 /* Receiver Options */
 const (
 	// Количество накопителей на каждого подписчика.
-	defaultCumCount = 2  
+	defaultCumCount = 2
 
 	// defaultMaxSize — максимальный размер пакета заказов отправленных в базу данных.
 	defaultMaxSize = 512
@@ -100,7 +100,7 @@ func (r *Receiver) massCumulate(ch <-chan inspector.OrderBox, cumCount int) {
 
 	for i := 0; i < cumCount; i++ {
 		go r.cumulative(ch, size, deadline)
-        // Это немного раскидывает тайминг запросов в базу данных
+		// Это немного раскидывает тайминг запросов в базу данных
 		// но только в рамках одного подписчика.
 		size = size - (size*32)/100
 		deadline = deadline - (deadline*16)/100
@@ -158,7 +158,7 @@ func (r *Receiver) subscriber() (<-chan inspector.OrderBox, error) {
 // (g 1) flush 2
 // (g 2) flush 2
 //
-// Только при большом трафике работает как ожидалось 
+// Только при большом трафике работает как ожидалось
 // (g 1) flush 80
 // (g 2) append 1
 // (g 2) append 1
@@ -166,10 +166,9 @@ func (r *Receiver) subscriber() (<-chan inspector.OrderBox, error) {
 // (g 2) flush 126
 // (g 1) append 1
 // (g 1) append 1
-//
 func (r *Receiver) cumulative(ch <-chan inspector.OrderBox, size int, deadline int) {
 	batch := make([]*inspector.OrderBox, 0, size)
-	
+
 	flush := func() {
 		results := r.repo.SaveOrderBatch(batch)
 
@@ -184,7 +183,7 @@ func (r *Receiver) cumulative(ch <-chan inspector.OrderBox, size int, deadline i
 		}
 
 		batch = batch[:0]
-			}
+	}
 
 	d := time.Duration(deadline)
 	ticker := time.NewTicker(d * time.Millisecond)
@@ -198,7 +197,7 @@ func (r *Receiver) cumulative(ch <-chan inspector.OrderBox, size int, deadline i
 
 		case box := <-ch:
 			batch = append(batch, &box)
-			
+
 			if len(batch) == size {
 				flush()
 				ticker.Reset(d * time.Millisecond)

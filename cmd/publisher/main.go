@@ -10,15 +10,70 @@ import (
 
 	"0lvl/internal/repository"
 
-	"github.com/rs/zerolog"
 	fake "github.com/brianvoe/gofakeit/v6"
 	stan "github.com/nats-io/stan.go"
+	"github.com/rs/zerolog"
 )
+
 
 func createLogger() zerolog.Logger {
 	zerolog.TimeFieldFormat = time.RFC3339Nano
 	output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.StampMilli}
 	return zerolog.New(output).With().Timestamp().Logger()
+}
+
+func main() {
+	time.Local = time.UTC
+	logger := createLogger()
+
+	sc, err := stan.Connect("test-cluster", "client-2")
+	if err != nil {
+		logger.Fatal().Err(err).Msg("")
+	}
+	defer sc.Close()
+
+	countPac := 10
+	count := 1000
+
+	defer timer(logger)(count * countPac)
+
+	for i := 0; i < countPac; i++ {
+		pub(sc, count, logger)
+	}
+}
+
+func pub(sc stan.Conn, count int, log zerolog.Logger) {
+	defer timer(log)(count)
+
+	for i := 0; i < count; i++ {
+		dataOrder := genOrder()
+
+		b, _ := json.Marshal(dataOrder)
+
+		err := sc.Publish("order", b)
+		if err != nil {
+			log.Fatal().Err(err).Msg("")
+		}
+	}
+}
+
+func timer(logger zerolog.Logger) func(c int) {
+	start := time.Now()
+	return func(c int) {
+		logger.Info().Int("count orders", c).Int("milliseconds", int(time.Since(start).Milliseconds())).Msg("publish done")
+	}
+}
+
+
+var alphaWb = []byte("abcdefghijklmnopqrstuvwxyz123456789")
+
+func nonceGenerate(size int) string {
+	b := make([]byte, size)
+	rand.Read(b)
+	for i := 0; i < size; i++ {
+		b[i] = alphaWb[b[i]%byte(len(alphaWb))]
+	}
+	return *(*string)(unsafe.Pointer(&b))
 }
 
 func genOrder() repository.Order {
@@ -84,48 +139,5 @@ func genOrder() repository.Order {
 		OofShard:          "1",
 	}
 
-	
 	return order
-}
-
-func timer(logger zerolog.Logger) func(c int) {
-	start := time.Now()
-	return func(c int) {
-		logger.Info().Int("count orders", c).Int("milliseconds", int(time.Since(start).Milliseconds())).Msg("publish done")
-	}
-}
-
-func main() {
-	time.Local = time.UTC
-
-	logger := createLogger()
-
-	sc, err := stan.Connect("test-cluster", "client-2"); if err != nil {
-		logger.Fatal().Err(err).Msg("")
-	}
-	defer sc.Close()
-
-    count := 6000
-	defer timer(logger)(count)
-
-	for i := 0; i < count; i++ {
-		dataOrder := genOrder()
-
-		b, _ := json.Marshal(dataOrder)
-
-		err = sc.Publish("order", b); if err != nil {
-			logger.Fatal().Err(err).Msg("")
-		}
-	}
-}
-
-var alphaWb = []byte("abcdefghijklmnopqrstuvwxyz123456789")
-
-func nonceGenerate(size int) string {
-	b := make([]byte, size)
-	rand.Read(b)
-	for i := 0; i < size; i++ {
-		b[i] = alphaWb[b[i]%byte(len(alphaWb))]
-	}
-	return *(*string)(unsafe.Pointer(&b))
 }

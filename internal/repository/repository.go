@@ -158,7 +158,7 @@ func (r *Repo) Metrica() []byte {
 
 // Рекурсивно заполняет кеш заказами из базы данных.
 // Пока в одном из баскетов кеша не потребуется удалять записи
-// Это заполняет кеш на 50%, хз как его заполнить чтобы более 
+// Это заполняет кеш на 50%, хз как его заполнить чтобы более
 // старые записи не затерли свежие.
 // В данной реализации кеша с баскетами
 func (r *Repo) СacheWarmUp() {
@@ -183,23 +183,31 @@ func (r *Repo) cacheWarmUpChank(limit int, cursor uint64) {
 	if err != nil {
 		r.log.Err(err).Msg("db error")
 	}
-	defer rows.Close()
 
+	rowsProcessed := 0
 	for rows.Next() {
 		rowValues := rows.RawValues()
 		hasNeedClean := r.cache.StopSet(rowValues[0], rowValues[2])
 
 		if hasNeedClean {
+			rows.Close()
 			return
 		}
 
 		cursor = binary.BigEndian.Uint64(rowValues[1])
+		rowsProcessed++
 	}
 
 	if err := rows.Err(); err != nil {
 		r.log.Err(err).Msg("db error")
 	}
+	
+	if rowsProcessed == 0 {
+		rows.Close()
+		return
+	}
 
+	rows.Close()
 	r.cacheWarmUpChank(selectLimit, cursor)
 }
 

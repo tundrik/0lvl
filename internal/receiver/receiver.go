@@ -111,7 +111,7 @@ func (r *Receiver) massCumulate(ch <-chan inspector.OrderBox, cumCount int) {
 // и отправляет по каналу
 // который читают несколько накопителей - cumulative
 func (r *Receiver) subscriber() (<-chan inspector.OrderBox, error) {
-	ch := make(chan inspector.OrderBox, 32)
+	ch := make(chan inspector.OrderBox)
 	ins := inspector.New()
 
 	accept := func(m *stan.Msg) {

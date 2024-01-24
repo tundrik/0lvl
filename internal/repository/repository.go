@@ -166,8 +166,6 @@ func (r *Repo) СacheWarmUp() {
 }
 
 func (r *Repo) cacheWarmUpChank(limit int, cursor uint64) {
-	defer timer(r.log)(limit)
-
 	var sql strings.Builder
 	namedArgs := make(map[string]interface{})
 	namedArgs["limit"] = limit
@@ -192,7 +190,6 @@ func (r *Repo) cacheWarmUpChank(limit int, cursor uint64) {
 		hasNeedClean := r.cache.StopSet(rowValues[0], rowValues[2])
 
 		if hasNeedClean {
-			r.log.Warn().Bool("StopNeedClean", hasNeedClean).Msg("")
 			return
 		}
 

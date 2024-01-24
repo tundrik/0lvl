@@ -44,6 +44,8 @@ type Receiver struct {
 	log  zerolog.Logger
 }
 
+// Инициализирует ресивер.
+// Создает соединение Stan.
 func New(repo *repository.Repo, cfg config.Config, log zerolog.Logger) (*Receiver, error) {
 	// Этот обратный вызов будет вызван, если клиент окончательно потеряет
 	// контакт с сервером (или другой клиент заменяет его во время пребывания conn.Close()).
@@ -72,6 +74,9 @@ func (r *Receiver) Close() {
 	r.conn.Close()
 }
 
+// Запускает подписчиков.
+// Каждый подписчик передает канал
+// нескольким накопителям.
 func (r *Receiver) Run() error {
 	// Количество подписчиков.
 	subCount := runtime.NumCPU() / 2
@@ -101,9 +106,10 @@ func (r *Receiver) massCumulate(ch <-chan inspector.OrderBox, cumCount int) {
 	}
 }
 
-// Подписчик создает канал и подписывается
+// Подписчик создает канал и подписывается.
 // На каждый обратный вызов проверяет данные
-// и отправляет по каналу в накопитель - cumulative
+// и отправляет по каналу
+// который читают несколько накопителей - cumulative
 func (r *Receiver) subscriber() (<-chan inspector.OrderBox, error) {
 	ch := make(chan inspector.OrderBox, 32)
 	ins := inspector.New()
@@ -144,7 +150,7 @@ func (r *Receiver) subscriber() (<-chan inspector.OrderBox, error) {
 // Блокируется в ожидании результатов от базы данных.
 func (r *Receiver) cumulative(ch <-chan inspector.OrderBox, size int, deadline int) {
 	batch := make([]*inspector.OrderBox, 0, size)
-
+	
 	flush := func() {
 		results := r.repo.SaveOrderBatch(batch)
 
@@ -159,7 +165,7 @@ func (r *Receiver) cumulative(ch <-chan inspector.OrderBox, size int, deadline i
 		}
 
 		batch = batch[:0]
-	}
+			}
 
 	d := time.Duration(deadline)
 	ticker := time.NewTicker(d * time.Millisecond)
@@ -173,7 +179,7 @@ func (r *Receiver) cumulative(ch <-chan inspector.OrderBox, size int, deadline i
 
 		case box := <-ch:
 			batch = append(batch, &box)
-
+			
 			if len(batch) == size {
 				flush()
 				ticker.Reset(d * time.Millisecond)

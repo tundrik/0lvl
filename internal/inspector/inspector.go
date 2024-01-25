@@ -33,6 +33,7 @@ func New() Ispector {
 	}
 }
 
+//TODO: Проверить наличие items
 func (sp Ispector) Audit(box OrderBox) OrderBox {
 
 	if len(box.Data) > maxLenData {
